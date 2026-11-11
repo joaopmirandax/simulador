@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Simular – Empresa</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<style>
+:root{--roxo:#44307a;--cinza:#d9d9d9;--ok:#2e9e5b;--ruim:#d64545;--txt:#111;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px);color-scheme:light}
+*{box-sizing:inherit}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+body{margin:0;background:#fff;font-family:Inter,Arial,Helvetica,sans-serif;color:var(--txt)}
+header{background:var(--roxo);color:#fff;display:flex;align-items:center;gap:10px;padding:8px 22px;font-size:15px}
+.logo{width:20px;height:20px;border-radius:50%;background:var(--cinza)}
+main{max-width:1100px;margin:0 auto;padding:30px 24px 40px}
+h1{color:var(--roxo);font-size:22px;margin:18px 0 16px 20px}
+.tabs{display:flex;gap:4px;flex-wrap:wrap;margin:0 0 14px}
+.tab{border:1px solid var(--cinza);background:#fff;border-radius:6px 6px 0 0;padding:6px 12px;font-size:13px;cursor:pointer;color:var(--roxo)}
+.tab.on{background:var(--roxo);color:#fff;border-color:var(--roxo)}
+.row{display:grid;grid-template-columns:repeat(10,minmax(0,1fr));gap:10px;text-align:center;font-size:14px}
+.row label{display:flex;flex-direction:column;gap:5px;align-items:center}
+input{width:100%;height:22px;border:0;background:var(--cinza);text-align:center;font:inherit;font-size:13px;border-radius:0}
+input:focus{outline:2px solid var(--roxo)}
+input[readonly]{background:#cfcfcf;font-weight:700}
+input.ok,input[readonly].ok{background:#cdeedb;color:#1e7a44;font-weight:700}
+input.no,input[readonly].no{background:#f6d3d3;color:#b02a2a;font-weight:700}
+.extra{display:flex;justify-content:center;gap:24px;margin-top:20px;text-align:center;font-size:14px}
+.extra label{display:flex;flex-direction:column;gap:5px;align-items:center;width:110px}
+.charts{display:grid;grid-template-columns:1fr 1fr;gap:28px;margin-top:34px}
+.card{min-width:0}
+.card h2{font-size:14px;margin:0 0 6px;color:var(--roxo)}
+.box{position:relative;height:300px}
+.leg{display:flex;gap:14px;flex-wrap:wrap;font-size:12px;margin-top:8px}
+.leg i{display:inline-block;width:11px;height:11px;margin-right:5px;vertical-align:-1px}
+.nota{font-size:12px;color:#555;margin:22px 0 0}
+.pct{text-align:center;font-size:13px;margin-top:14px;color:var(--roxo);font-weight:600}
+@media(max-width:800px){.row{grid-template-columns:repeat(3,1fr)}.charts{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<header><span class="logo"></span>TESTE</header>
+<main>
+<h1>SIMULAR</h1>
+<div class="tabs" id="tabs"></div>
+<div class="row" id="row"></div>
+<div class="extra">
+ <label>Horas Extras<br>Para produzir<input id="horas" readonly></label>
+ <label>Diferença<br>&nbsp;<input id="dif" readonly></label>
+</div>
+<div class="pct" id="pct"></div>
+<div class="charts">
+ <div class="card"><h2>Geral — soma das 10 peças</h2><div class="box"><canvas id="c1"></canvas></div><div class="leg" id="l1"></div></div>
+ <div class="card"><h2 id="t2">Seg — produção por peça</h2><div class="tabs" id="tabsDia"></div><div class="box"><canvas id="c2"></canvas></div><div class="leg" id="l2"></div></div>
+</div>
+<p class="nota">Meta = total da semana (Folga + Seg a Sáb). Diferença = Produzidos − Meta. Necessário por dia = (Meta − Folga) ÷ 6. Horas extras = Diferença ÷ 50 peças por hora (só aparece quando a Diferença é negativa).</p>
+</main>
+<script>
+const PPH=50, N=10, DIAS=['Seg','Terça','Quarta','Quinta','Sexta','Sáb'];
+const OK='#2e9e5b',RUIM='#d64545',ROXO='#44307a',OURO='#c9a24a';
+const num=v=>{const n=parseFloat(String(v).replace(',','.'));return isFinite(n)?n:0};
+const pecas=Array.from({length:N},()=>({prev:'',folga:'',meta:'',d:['','','','','','']}));
+let ativa=0;
+
+
+const campos=[['Previsão','prev'],['Folga','folga'],['Meta','meta'],...DIAS.map((n,i)=>[n,i])];
+const row=document.getElementById('row');
+campos.forEach(([nome,k])=>{
+  const l=document.createElement('label');l.innerHTML=nome+'<input type="number" step="any" min="0">';
+  l.firstChild.nextSibling.addEventListener('input',e=>{
+    const p=pecas[ativa];
+    if(typeof k==='number')p.d[k]=e.target.value;else p[k]=e.target.value;
+    atualizar();
+  });
+  row.appendChild(l);
+});
+row.insertAdjacentHTML('beforeend','<label>Produzidos<input id="prod" readonly></label>');
+const ins=[...row.querySelectorAll('input')];
+
+const tabs=document.getElementById('tabs');
+for(let i=0;i<N;i++){
+  const b=document.createElement('button');b.className='tab';b.textContent='Peça '+(i+1);
+  b.onclick=()=>{ativa=i;carregar();};tabs.appendChild(b);
+}
+
+function calc(p){
+  const dias=p.d.map(num),folga=num(p.folga),prev=num(p.prev);
+  const prod=folga+dias.reduce((a,b)=>a+b,0);
+  const metaT=num(p.meta);
+  const dif=prod-metaT;
+  const horas=dif<0?-dif/PPH:0;
+  return{dias,folga,prev,prod,dif,horas,metaT,meta:Math.max(metaT-folga,0)/6};
+}
+const fmt=(n,d=1)=>Number.isInteger(n)?String(n):n.toFixed(d).replace('.',',');
+
+function carregar(){
+  [...tabs.children].forEach((b,i)=>b.classList.toggle('on',i===ativa));
+  const p=pecas[ativa];
+  ins[0].value=p.prev;ins[1].value=p.folga;ins[2].value=p.meta;p.d.forEach((v,i)=>ins[3+i].value=v);
+  
+  atualizar();
+}
+
+const rotulos=['Previsão','Folga','Meta',...DIAS,'Produzidos','Diferença'];
+function mk(id){
+  return new Chart(document.getElementById(id),{
+    data:{labels:rotulos,datasets:[
+      {type:'bar',label:'Valor',data:[],backgroundColor:[],borderRadius:3},
+      {type:'line',label:'Meta diária',data:[],borderColor:'#111',borderDash:[5,4],pointRadius:0,borderWidth:1.5,spanGaps:false}
+    ]},
+    options:{responsive:true,maintainAspectRatio:false,animation:{duration:250},
+      plugins:{legend:{display:false}},
+      scales:{y:{grid:{color:'#eee'}},x:{grid:{display:false}}}}
+  });
+}
+const g1=mk('c1');
+let dia=0;
+const g2=new Chart(document.getElementById('c2'),{data:{labels:Array.from({length:N},(_,i)=>'Peça '+(i+1)),datasets:[{type:'bar',label:'Produzido',data:[],backgroundColor:[],borderRadius:3},{type:'line',label:'Necessário no dia',data:[],borderColor:'#111',borderDash:[5,4],pointRadius:0,borderWidth:1.5}]},options:{responsive:true,maintainAspectRatio:false,animation:{duration:250},plugins:{legend:{display:false}},scales:{y:{grid:{color:'#eee'}},x:{grid:{display:false}}}}});
+function preencherDia(){
+  const cs=pecas.map(calc);
+  g2.data.datasets[0].data=cs.map(x=>x.dias[dia]);
+  g2.data.datasets[0].backgroundColor=cs.map(x=>x.metaT>0&&x.dias[dia]>=x.meta?OK:RUIM);
+  g2.data.datasets[1].data=cs.map(x=>x.meta);
+  g2.update();
+  document.getElementById('t2').textContent=DIAS[dia]+' — produção por peça';
+}
+const tabsDia=document.getElementById('tabsDia');
+DIAS.forEach((n,i)=>{const b=document.createElement('button');b.className='tab'+(i===0?' on':'');b.textContent=n;b.onclick=()=>{dia=i;[...tabsDia.children].forEach((x,j)=>x.classList.toggle('on',j===i));preencherDia();};tabsDia.appendChild(b);});
+
+function preencher(g,c){
+  const cor=[ROXO,OURO,'#7a6bb3'];
+  c.dias.forEach(v=>cor.push(c.metaT>0&&v>=c.meta?OK:RUIM));
+  cor.push(c.prod>=c.metaT&&c.metaT>0?OK:RUIM,c.dif>=0&&c.metaT>0?OK:RUIM);
+  g.data.datasets[0].data=[c.prev,c.folga,c.metaT,...c.dias,c.prod,c.dif];
+  g.data.datasets[0].backgroundColor=cor;
+  g.data.datasets[1].data=[null,null,null,...c.dias.map(()=>c.meta),null,null];
+  g.update();
+}
+function legenda(id){
+  document.getElementById(id).innerHTML=
+  `<span><i style="background:${OK}"></i>Bateu o resultado necessário</span>
+   <span><i style="background:${RUIM}"></i>Não bateu</span>
+   <span><i style="background:${ROXO}"></i>Previsão</span>
+   <span><i style="background:${OURO}"></i>Folga</span>
+   <span><i style="background:#7a6bb3"></i>Meta</span>
+   <span><i style="border-top:2px dashed #111;height:0;width:14px"></i>Necessário por dia</span>`;
+}
+
+function atualizar(){
+  const c=calc(pecas[ativa]);
+  document.getElementById('prod').value=fmt(c.prod);
+  const cls=(el,s)=>{el.classList.toggle('ok',s===1);el.classList.toggle('no',s===-1)};
+  const tem=c.metaT>0;
+  c.dias.forEach((v,i)=>cls(ins[3+i],tem&&pecas[ativa].d[i]!==''?(v>=c.meta?1:-1):0));
+  cls(document.getElementById('prod'),tem?(c.prod>=c.metaT?1:-1):0);
+  cls(document.getElementById('dif'),tem?(c.dif>=0?1:-1):0);
+  document.getElementById('dif').value=fmt(c.dif);
+  document.getElementById('horas').value=fmt(c.horas)+' h';
+  document.getElementById('pct').textContent=c.prev>0?'Folga atingiu '+fmt(c.folga/c.prev*100)+'% da Previsão (Peça '+(ativa+1)+')':'';
+  preencherDia();
+  const t={dias:[0,0,0,0,0,0],folga:0,prev:0,prod:0,dif:0,meta:0,metaT:0};
+  pecas.map(calc).forEach(x=>{
+    x.dias.forEach((v,i)=>t.dias[i]+=v);
+    t.folga+=x.folga;t.prev+=x.prev;t.prod+=x.prod;t.dif+=x.dif;t.metaT+=x.metaT;t.meta+=x.meta;
+  });
+  preencher(g1,t);
+}
+legenda('l1');
+document.getElementById('l2').innerHTML=`<span><i style="background:${OK}"></i>Bateu o necessário no dia</span><span><i style="background:${RUIM}"></i>Não bateu</span><span><i style="border-top:2px dashed #111;height:0;width:14px"></i>Necessário por dia, (Meta − Folga) ÷ 6</span>`;
+carregar();
+</script>
+</body>
+</html>
